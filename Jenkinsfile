@@ -7,13 +7,6 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                // Checkout the source code from your Git repository
-                git 'https://github.com/skang88/downtime-exporter'
-            }
-        }
-
         stage('Build Docker Image') {
             steps {
                 script {
