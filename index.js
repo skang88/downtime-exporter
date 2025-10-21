@@ -21,7 +21,7 @@ promClient.collectDefaultMetrics({ register });
 // Metric 1: 현재 진행중인 다운타임 (마지막 생산시간 ~ 현재시간)
 const ongoingDowntimeGauge = new promClient.Gauge({
     name: 'production_ongoing_downtime_seconds',
-    help: 'Ongoing downtime since the last production event for a specific line. Resets to NaN if downtime exceeds 5 minutes.',
+    help: 'Ongoing downtime since the last production event for a specific line.',
     labelNames: ['line'],
     registers: [register]
 });
@@ -117,12 +117,7 @@ async function checkDowntime() {
             const now = new Date();
             if (lastKnownTimestamps[table]) {
                 const ongoingDowntimeSeconds = (now.getTime() - lastKnownTimestamps[table].getTime()) / 1000;
-                // 5분 (300초) 이상이면 비정상으로 보고 NaN으로 처리
-                if (ongoingDowntimeSeconds > 300) {
-                    ongoingDowntimeGauge.labels(table).set(NaN);
-                } else {
-                    ongoingDowntimeGauge.labels(table).set(ongoingDowntimeSeconds);
-                }
+                ongoingDowntimeGauge.labels(table).set(ongoingDowntimeSeconds);
             } else {
                 // 데이터가 아직 없으면 다운타임은 0
                 ongoingDowntimeGauge.labels(table).set(0);

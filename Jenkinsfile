@@ -1,5 +1,5 @@
 pipeline {
-    agent any // Or specify a node with Docker installed, e.g., agent { label 'docker' }
+    agent any // Jenkins 에이전트에 Docker가 설치되어 있어야 합니다.
 
     environment {
         IMAGE_NAME = 'downtime-exporter'
@@ -16,32 +16,25 @@ pipeline {
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy (Local)') {
             steps {
-                // This deployment strategy assumes Jenkins has SSH access to the Docker host.
-                // You will need to configure SSH credentials in Jenkins with the ID 'your-ssh-credentials'.
-                echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG}..."
-                withCredentials([sshUserPrivateKey(credentialsId: 'your-ssh-credentials', keyFileVariable: 'SSH_KEY')]) {
-                    sh '''
-                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no user@your-server.com " \
-                            docker stop ${IMAGE_NAME} || true && \
-                            docker rm ${IMAGE_NAME} || true && \
-                            docker run -d --rm --name ${IMAGE_NAME} -p 8002:8002 \
-                                -e DB_HOST=your_db_host \
-                                -e DB_USER=your_db_user \
-                                -e DB_PASSWORD=your_db_password \
-                                -e DB_DATABASE=your_db_name \
-                                ${IMAGE_NAME}:${IMAGE_TAG}
-                        "
-                    '''
-                }
+                script {
+                    def dockerImage = "${IMAGE_NAME}:${env.BUILD_NUMBER}"
+                    echo "Deploying image ${dockerImage} on the Jenkins agent..."
+
+                    // Jenkins 에이전트에서 기존 컨테이너를 중지하고 새 버전으로 실행합니다.
+                    // 이 단계는 Jenkins 에이전트가 Docker를 실행할 수 있어야 합니다.
+                                sh '''
+                                    docker stop ${IMAGE_NAME} || true
+                                    docker rm ${IMAGE_NAME} || true
+                                    docker run -d --restart always --name ${IMAGE_NAME} -p 8001:9101 ${dockerImage}
+                                '''                }
             }
         }
     }
 
     post {
         always {
-            // Clean up workspace or send notifications
             echo 'Pipeline finished.'
         }
     }
