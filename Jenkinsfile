@@ -12,7 +12,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 // Checkout the source code from your Git repository
-                git 'https://github.com/skang88/downtime-exporter.git'
+                git 'https://github.com/skang88/downtime-exporter'
             }
         }
 
