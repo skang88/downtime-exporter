@@ -11,7 +11,7 @@ const dbConfig = {
     database: process.env.DB_DATABASE || 'SPC'
 };
 
-const port = process.env.PORT || 9100;
+const port = process.env.PORT || 8002;
 const tablesToMonitor = ['F01', 'R01'];
 
 // --- Prometheus Metrics ---
@@ -52,16 +52,16 @@ async function checkDowntime() {
             // --- Initialization Logic (runs only if lastKnownTimestamps[table] is not set) ---
             if (!lastKnownTimestamps[table]) {
                 const initSql = `SELECT 
- timestamp 
- FROM ${dbConfig.database}.${table} ORDER BY 
- timestamp 
- DESC LIMIT 2`;
+                                timestamp 
+                                FROM ${dbConfig.database}.${table} ORDER BY 
+                                timestamp 
+                                DESC LIMIT 2`;
                 const [initRows] = await connection.execute(initSql);
                 if (initRows.length === 2) {
                     const lastTs = new Date(initRows[0].timestamp);
                     const secondLastTs = new Date(initRows[1].timestamp);
                     const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
-                    
+
                     if (cycleTimeSeconds > 0) {
                         // 5분 (300초) 이상이면 비정상으로 보고 NaN으로 처리
                         if (cycleTimeSeconds > 300) {
@@ -83,12 +83,12 @@ async function checkDowntime() {
             const lastSeenTimestamp = lastKnownTimestamps[table];
             if (lastSeenTimestamp) {
                 const sql = `SELECT 
- timestamp 
- FROM ${dbConfig.database}.${table} WHERE 
- timestamp 
- > ? ORDER BY 
- timestamp 
- ASC`;
+                            timestamp 
+                            FROM ${dbConfig.database}.${table} WHERE 
+                            timestamp 
+                            > ? ORDER BY 
+                            timestamp 
+                            ASC`;
                 const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
                 const newTimestamps = newRows.map(row => new Date(row.timestamp));
 

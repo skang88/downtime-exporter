@@ -2,8 +2,6 @@ pipeline {
     agent any // Or specify a node with Docker installed, e.g., agent { label 'docker' }
 
     environment {
-        // Define a registry and image name. Change these to your actual registry and image name.
-        REGISTRY = 'your-docker-registry' // e.g., 'docker.io/your-username' or your private registry
         IMAGE_NAME = 'downtime-exporter'
         IMAGE_TAG = "v1.0.${env.BUILD_NUMBER}"
     }
@@ -20,48 +18,30 @@ pipeline {
             steps {
                 script {
                     echo "Building Docker image: ${IMAGE_NAME}:${IMAGE_TAG}"
-                    // The docker.build command assumes you have Docker configured in Jenkins
-                    def dockerImage = docker.build("${IMAGE_NAME}:${IMAGE_TAG}", '.')
-                }
-            }
-        }
-
-        stage('Push Docker Image') {
-            steps {
-                script {
-                    // Log in to the Docker registry and push the image
-                    // This requires credentials to be configured in Jenkins (e.g., with ID 'docker-registry-credentials')
-                    docker.withRegistry("https://${REGISTRY}", 'docker-registry-credentials') {
-                        echo "Pushing Docker image to ${REGISTRY}"
-                        dockerImage.push()
-                    }
+                    docker.build("${IMAGE_NAME}:${IMAGE_TAG}", '.')
                 }
             }
         }
 
         stage('Deploy') {
             steps {
-                // This is a placeholder for your deployment strategy.
-                // You might use `sshagent` to SSH into a server and run the Docker container,
-                // or use kubectl to apply a deployment in a Kubernetes cluster.
+                // This deployment strategy assumes Jenkins has SSH access to the Docker host.
+                // You will need to configure SSH credentials in Jenkins with the ID 'your-ssh-credentials'.
                 echo "Deploying ${IMAGE_NAME}:${IMAGE_TAG}..."
-                /*
                 withCredentials([sshUserPrivateKey(credentialsId: 'your-ssh-credentials', keyFileVariable: 'SSH_KEY')]) {
                     sh '''
-                        ssh -i $SSH_KEY user@your-server.com " \
-                            docker pull ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG} && \
+                        ssh -i $SSH_KEY -o StrictHostKeyChecking=no user@your-server.com " \
                             docker stop ${IMAGE_NAME} || true && \
                             docker rm ${IMAGE_NAME} || true && \
-                            docker run -d --rm --name ${IMAGE_NAME} -p 9100:9100 \
+                            docker run -d --rm --name ${IMAGE_NAME} -p 8002:8002 \
                                 -e DB_HOST=your_db_host \
                                 -e DB_USER=your_db_user \
                                 -e DB_PASSWORD=your_db_password \
                                 -e DB_DATABASE=your_db_name \
-                                ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+                                ${IMAGE_NAME}:${IMAGE_TAG}
                         "
                     '''
                 }
-                */
             }
         }
     }
