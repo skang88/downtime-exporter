@@ -80,6 +80,7 @@ async function checkDowntime() {
                 } else if (initRows.length === 1) {
                     lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'America/New_York').toDate(); // Only one row exists, just set the starting point
                 }
+                console.log(`[${new Date().toISOString()}] Raw DB Initial timestamp for ${table}: ${initRows[0]?.timestamp}`);
                 console.log(`[${new Date().toISOString()}] Initial timestamp for ${table} loaded: ${lastKnownTimestamps[table]?.toISOString()}`);
             }
 
@@ -94,6 +95,7 @@ async function checkDowntime() {
                             timestamp 
                             ASC`;
                 const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
+                console.log(`[${new Date().toISOString()}] Raw DB New Timestamps for ${table}: ${newRows.map(row => row.timestamp).join(', ')}`);
                 const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
 
                 if (newTimestamps.length > 0) {
@@ -132,7 +134,7 @@ async function checkDowntime() {
                 if (isWorkingHours) {
                     const lastProductionTime = moment.tz(lastKnownTimestamps[table], 'America/New_York');
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
-                    console.log(`Last Production Time for ${table}: ${lastProductionTime.toISOString()}`);
+                    console.log(`Last Production Time for ${table} (America/New_York): ${lastProductionTime.format('YYYY-MM-DD HH:mm:ss')}`);
                     ongoingDowntimeGauge.labels(table).set(downtimeSeconds > 0 ? downtimeSeconds : 0);
                     console.log(`[${now.toISOString()}] Ongoing downtime for ${table}: ${downtimeSeconds}s`);
                 } else {
