@@ -116,14 +116,23 @@ async function checkDowntime() {
             }
 
             // --- Ongoing downtime calculation ---
-            const now = new Date();
-            if (lastKnownTimestamps[table]) {
-                const ongoingDowntimeSeconds = (now.getTime() - lastKnownTimestamps[table].getTime()) / 1000;
-                ongoingDowntimeGauge.labels(table).set(ongoingDowntimeSeconds);
-            } else {
-                // 데이터가 아직 없으면 다운타임은 0
-                ongoingDowntimeGauge.labels(table).set(0);
-            }
+    let downtime = 0;
+    if (!status.up && status.lastDownTime) {
+      const now = new Date();
+      const currentHour = now.getHours();
+      const currentMinute = now.getMinutes();
+
+      // Check if current time is within working hours (07:00 to 15:30)
+      const isWorkingHours =
+        (currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
+        (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
+
+      if (isWorkingHours) {
+        downtime = (now.getTime() - status.lastDownTime.getTime()) / 1000;
+      } else {
+        downtime = 0; // Set downtime to 0 outside working hours
+      }
+    }
         }
     } catch (error) {
         console.error('Database connection failed:', error.message);
