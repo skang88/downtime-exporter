@@ -7,10 +7,10 @@ const moment = require('moment-timezone');
 // 환경 변수를 통해 데이터베이스 연결 정보를 설정하는 것이 좋습니다.
 
 const dbConfig = {
-    host: process.env.DB_HOST || '172.16.220.32',
-    user: process.env.DB_USER || 'seokgyun',
-    password: process.env.DB_PASSWORD || '1q2w3e4r',
-    database: process.env.DB_DATABASE || 'SPC', 
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_DATABASE, 
     dateStrings: true // DATETIME 값을 문자열로 가져오도록 설정
 };
 
