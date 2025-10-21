@@ -23,12 +23,21 @@ pipeline {
                     echo "Deploying image ${IMAGE_NAME}:${IMAGE_TAG} on the Jenkins agent..."
                     
                     // DB 비밀번호를 위해 Jenkins credentials를 사용합니다.
-                    withCredentials([string(credentialsId: 'db-password', variable: 'DB_PASSWORD_SECRET')]) {
+                    withCredentials([
+                        string(credentialsId: 'db-host', variable: 'DB_HOST_SECRET'),
+                        string(credentialsId: 'db-user', variable: 'DB_USER_SECRET'),
+                        string(credentialsId: 'db-password', variable: 'DB_PASSWORD_SECRET'),
+                        string(credentialsId: 'db-database', variable: 'DB_DATABASE_SECRET')
+                    ]) {
                         sh '''
                             docker stop ${IMAGE_NAME} || true
                             docker rm ${IMAGE_NAME} || true
                             # 포트 번호를 8002:8002로 수정하고 DB 환경변수를 추가합니다.
                             docker run -d --restart always --name ${IMAGE_NAME} -p 8002:8002 \
+                                -e DB_HOST=${DB_HOST_SECRET} \
+                                -e DB_USER=${DB_USER_SECRET} \
+                                -e DB_PASSWORD=${DB_PASSWORD_SECRET} \
+                                -e DB_DATABASE=${DB_DATABASE_SECRET} \
                                 ${IMAGE_NAME}:${IMAGE_TAG}
                         '''
                     }
