@@ -5,13 +5,15 @@ const moment = require('moment-timezone');
 
 // --- Configuration ---
 // 환경 변수를 통해 데이터베이스 연결 정보를 설정하는 것이 좋습니다.
+
 const dbConfig = {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
+    host: process.env.DB_HOST || '172.16.220.32',
+    user: process.env.DB_USER || 'seokgyun',
+    password: process.env.DB_PASSWORD || '1q2w3e4r',
+    database: process.env.DB_DATABASE || 'SPC', 
     dateStrings: true // DATETIME 값을 문자열로 가져오도록 설정
 };
+
 
 const port = process.env.PORT || 8002;
 const tablesToMonitor = ['F01', 'R01'];
@@ -115,24 +117,7 @@ async function checkDowntime() {
                 }
             }
 
-            // --- Ongoing downtime calculation ---
-    let downtime = 0;
-    if (!status.up && status.lastDownTime) {
-      const now = new Date();
-      const currentHour = now.getHours();
-      const currentMinute = now.getMinutes();
 
-      // Check if current time is within working hours (07:00 to 15:30)
-      const isWorkingHours =
-        (currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
-        (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
-
-      if (isWorkingHours) {
-        downtime = (now.getTime() - status.lastDownTime.getTime()) / 1000;
-      } else {
-        downtime = 0; // Set downtime to 0 outside working hours
-      }
-    }
         }
     } catch (error) {
         console.error('Database connection failed:', error.message);
