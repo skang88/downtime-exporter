@@ -60,8 +60,10 @@ async function checkDowntime() {
                                 DESC LIMIT 2`;
                 const [initRows] = await connection.execute(initSql);
                 if (initRows.length === 2) {
-                    const lastTs = moment.tz(initRows[0].timestamp, 'UTC').toDate();
-                    const secondLastTs = moment.tz(initRows[1].timestamp, 'UTC').toDate();
+                    console.log(`[${new Date().toISOString()}] Raw initRows[0].timestamp for ${table}: ${initRows[0].timestamp}`);
+                    console.log(`[${new Date().toISOString()}] Raw initRows[1].timestamp for ${table}: ${initRows[1].timestamp}`);
+                    const lastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
+                    const secondLastTs = moment.tz(initRows[1].timestamp, 'America/New_York').toDate();
                     const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
                     if (cycleTimeSeconds > 0) {
@@ -76,13 +78,15 @@ async function checkDowntime() {
                     }
                     lastKnownTimestamps[table] = lastTs; // Set the starting point
                 } else if (initRows.length === 1) {
-                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'UTC').toDate(); // Only one row exists, just set the starting point
+                    console.log(`[${new Date().toISOString()}] Raw initRows[0].timestamp for ${table} (single row): ${initRows[0].timestamp}`);
+                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'America/New_York').toDate(); // Only one row exists, just set the starting point
                 }
                 console.log(`[${new Date().toISOString()}] Initial timestamp for ${table} loaded: ${lastKnownTimestamps[table]?.toISOString()}`);
             }
 
             // --- Main processing logic for new items (Cycle Time) ---
             const lastSeenTimestamp = lastKnownTimestamps[table];
+            console.log(`[${new Date().toISOString()}] lastSeenTimestamp for ${table}: ${lastSeenTimestamp?.toISOString()}`);
             if (lastSeenTimestamp) {
                 const sql = `SELECT 
                             timestamp 
@@ -92,7 +96,9 @@ async function checkDowntime() {
                             timestamp 
                             ASC`;
                 const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
-                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'UTC').toDate());
+                console.log(`[${new Date().toISOString()}] Raw newRows for ${table}:`, newRows.map(row => row.timestamp));
+                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
+                console.log(`[${new Date().toISOString()}] Converted newTimestamps for ${table}:`, newTimestamps.map(ts => ts.toISOString()));
 
                 if (newTimestamps.length > 0) {
                     let previousTimestampInBatch = lastKnownTimestamps[table];
@@ -119,6 +125,7 @@ async function checkDowntime() {
             const now = new Date();
             if (lastKnownTimestamps[table]) {
                 const ongoingDowntimeSeconds = (now.getTime() - lastKnownTimestamps[table].getTime()) / 1000;
+                console.log(`[${new Date().toISOString()}] Ongoing downtime for ${table}: ${ongoingDowntimeSeconds}s (now: ${now.toISOString()}, lastKnown: ${lastKnownTimestamps[table].toISOString()})`);
                 ongoingDowntimeGauge.labels(table).set(ongoingDowntimeSeconds);
             } else {
                 // 데이터가 아직 없으면 다운타임은 0
