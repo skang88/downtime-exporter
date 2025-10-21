@@ -60,8 +60,8 @@ async function checkDowntime() {
                                 DESC LIMIT 2`;
                 const [initRows] = await connection.execute(initSql);
                 if (initRows.length === 2) {
-                    const lastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
-                    const secondLastTs = moment.tz(initRows[1].timestamp, 'America/New_York').toDate();
+                    const lastTs = moment.tz(initRows[0].timestamp, 'UTC').toDate();
+                    const secondLastTs = moment.tz(initRows[1].timestamp, 'UTC').toDate();
                     const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
                     if (cycleTimeSeconds > 0) {
@@ -76,7 +76,7 @@ async function checkDowntime() {
                     }
                     lastKnownTimestamps[table] = lastTs; // Set the starting point
                 } else if (initRows.length === 1) {
-                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'America/New_York').toDate(); // Only one row exists, just set the starting point
+                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'UTC').toDate(); // Only one row exists, just set the starting point
                 }
                 console.log(`[${new Date().toISOString()}] Initial timestamp for ${table} loaded: ${lastKnownTimestamps[table]?.toISOString()}`);
             }
@@ -92,7 +92,7 @@ async function checkDowntime() {
                             timestamp 
                             ASC`;
                 const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
-                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
+                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'UTC').toDate());
 
                 if (newTimestamps.length > 0) {
                     let previousTimestampInBatch = lastKnownTimestamps[table];
