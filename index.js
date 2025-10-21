@@ -1,6 +1,7 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
 const promClient = require('prom-client');
+const moment = require('moment-timezone');
 
 // --- Configuration ---
 // 환경 변수를 통해 데이터베이스 연결 정보를 설정하는 것이 좋습니다.
@@ -9,7 +10,7 @@ const dbConfig = {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE,
-    timezone: 'Z'
+    dateStrings: true // DATETIME 값을 문자열로 가져오도록 설정
 };
 
 const port = process.env.PORT || 8002;
@@ -59,8 +60,8 @@ async function checkDowntime() {
                                 DESC LIMIT 2`;
                 const [initRows] = await connection.execute(initSql);
                 if (initRows.length === 2) {
-                    const lastTs = new Date(initRows[0].timestamp);
-                    const secondLastTs = new Date(initRows[1].timestamp);
+                    const lastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
+                    const secondLastTs = moment.tz(initRows[1].timestamp, 'America/New_York').toDate();
                     const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
                     if (cycleTimeSeconds > 0) {
@@ -75,7 +76,7 @@ async function checkDowntime() {
                     }
                     lastKnownTimestamps[table] = lastTs; // Set the starting point
                 } else if (initRows.length === 1) {
-                    lastKnownTimestamps[table] = new Date(initRows[0].timestamp); // Only one row exists, just set the starting point
+                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'America/New_York').toDate(); // Only one row exists, just set the starting point
                 }
                 console.log(`[${new Date().toISOString()}] Initial timestamp for ${table} loaded: ${lastKnownTimestamps[table]?.toISOString()}`);
             }
@@ -91,7 +92,7 @@ async function checkDowntime() {
                             timestamp 
                             ASC`;
                 const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
-                const newTimestamps = newRows.map(row => new Date(row.timestamp));
+                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
 
                 if (newTimestamps.length > 0) {
                     let previousTimestampInBatch = lastKnownTimestamps[table];
