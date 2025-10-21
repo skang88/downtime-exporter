@@ -132,6 +132,7 @@ async function checkDowntime() {
                 if (isWorkingHours) {
                     const lastProductionTime = moment.tz(lastKnownTimestamps[table], 'America/New_York');
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
+                    console.log(`Last Production Time for ${table}: ${lastProductionTime.toISOString()}`);
                     ongoingDowntimeGauge.labels(table).set(downtimeSeconds > 0 ? downtimeSeconds : 0);
                     console.log(`[${now.toISOString()}] Ongoing downtime for ${table}: ${downtimeSeconds}s`);
                 } else {
