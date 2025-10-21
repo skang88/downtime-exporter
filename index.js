@@ -117,6 +117,31 @@ async function checkDowntime() {
                 }
             }
 
+            // --- Ongoing downtime calculation ---
+            const now = moment().tz('America/New_York'); // Use moment-timezone for consistency
+            const currentHour = now.hours();
+            const currentMinute = now.minutes();
+
+            const isWorkingHours =
+                (currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
+                (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
+
+            console.log(`[${now.toISOString()}] Current Time: ${currentHour}:${currentMinute}, Is Working Hours: ${isWorkingHours}`);
+
+            if (lastKnownTimestamps[table]) {
+                if (isWorkingHours) {
+                    const lastProductionTime = moment.tz(lastKnownTimestamps[table], 'America/New_York');
+                    const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
+                    ongoingDowntimeGauge.labels(table).set(downtimeSeconds > 0 ? downtimeSeconds : 0);
+                    console.log(`[${now.toISOString()}] Ongoing downtime for ${table}: ${downtimeSeconds}s`);
+                } else {
+                    ongoingDowntimeGauge.labels(table).set(0);
+                    console.log(`[${now.toISOString()}] Outside working hours, ongoing downtime for ${table} set to 0.`);
+                }
+            } else {
+                ongoingDowntimeGauge.labels(table).set(0); // No last production time, so no ongoing downtime
+                console.log(`[${now.toISOString()}] No last known timestamp for ${table}, ongoing downtime set to 0.`);
+            }
 
         }
     } catch (error) {
