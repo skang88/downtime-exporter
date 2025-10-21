@@ -3,7 +3,8 @@ pipeline {
 
     environment {
         IMAGE_NAME = 'downtime-exporter'
-        IMAGE_TAG = "v1.0.${env.BUILD_NUMBER}"
+        // 태그에서 'v1.0.' 접두사를 제거하여 빌드와 배포 단계를 통일합니다.
+        IMAGE_TAG = "${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -19,16 +20,19 @@ pipeline {
         stage('Deploy (Local)') {
             steps {
                 script {
-                    def dockerImage = "${IMAGE_NAME}:${env.BUILD_NUMBER}"
-                    echo "Deploying image ${dockerImage} on the Jenkins agent..."
-
-                    // Jenkins 에이전트에서 기존 컨테이너를 중지하고 새 버전으로 실행합니다.
-                    // 이 단계는 Jenkins 에이전트가 Docker를 실행할 수 있어야 합니다.
-                                sh '''
-                                    docker stop ${IMAGE_NAME} || true
-                                    docker rm ${IMAGE_NAME} || true
-                                    docker run -d --restart always --name ${IMAGE_NAME} -p 8001:9101 ${dockerImage}
-                                '''                }
+                    echo "Deploying image ${IMAGE_NAME}:${IMAGE_TAG} on the Jenkins agent..."
+                    
+                    // DB 비밀번호를 위해 Jenkins credentials를 사용합니다.
+                    withCredentials([string(credentialsId: 'db-password', variable: 'DB_PASSWORD_SECRET')]) {
+                        sh '''
+                            docker stop ${IMAGE_NAME} || true
+                            docker rm ${IMAGE_NAME} || true
+                            # 포트 번호를 8002:8002로 수정하고 DB 환경변수를 추가합니다.
+                            docker run -d --restart always --name ${IMAGE_NAME} -p 8002:8002 \
+                                ${IMAGE_NAME}:${IMAGE_TAG}
+                        '''
+                    }
+                }
             }
         }
     }
