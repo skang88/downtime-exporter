@@ -87,6 +87,7 @@ async function checkDowntime() {
             // --- Main processing logic for new items (Cycle Time) ---
             const lastSeenTimestamp = lastKnownTimestamps[table];
             if (lastSeenTimestamp) {
+                console.log(`[${new Date().toISOString()}] Querying for new timestamps after: ${lastSeenTimestamp.toISOString()}`);
                 const sql = `SELECT 
                             timestamp 
                             FROM ${dbConfig.database}.${table} WHERE 
@@ -94,7 +95,7 @@ async function checkDowntime() {
                             > ? ORDER BY 
                             timestamp 
                             ASC`;
-                const [newRows] = await connection.execute(sql, [lastSeenTimestamp]);
+                const [newRows] = await connection.execute(sql, [moment.tz(lastSeenTimestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
                 console.log(`[${new Date().toISOString()}] Raw DB New Timestamps for ${table}: ${newRows.map(row => row.timestamp).join(', ')}`);
                 const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
 
