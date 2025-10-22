@@ -33,7 +33,7 @@ const ongoingDowntimeGauge = new promClient.Gauge({
 // Metric 2: 과거 생산 사이클 시간 (직전 생산시간 ~ 마지막 생산시간)
 const cycleTimeGauge = new promClient.Gauge({
     name: 'production_cycle_time_seconds',
-    help: 'The time elapsed between the last two production events for a specific line. Displayed as NaN if it exceeds 5 minutes.',
+    help: 'The time elapsed between the last two production events for a specific line.',
     labelNames: ['line'],
     registers: [register]
 });
@@ -41,8 +41,9 @@ const cycleTimeGauge = new promClient.Gauge({
 
 // --- Application Logic ---
 const app = express();
-// 각 테이블의 마지막으로 확인된 타임스탬프를 저장합니다.
+// 각 테이블의 마지막으로 확인된 타임스탬프와 사이클 타임을 저장합니다.
 let lastKnownTimestamps = {};
+let lastKnownCycleTimes = {};
 
 /**
  * 주기적으로 다운타임을 확인하고 메트릭을 업데이트합니다.
@@ -51,43 +52,43 @@ async function checkDowntime() {
     let connection;
     try {
         connection = await mysql.createConnection(dbConfig);
+        const todayShiftStart = moment().tz('America/New_York').startOf('day').add(7, 'hours');
+
         for (const table of tablesToMonitor) {
+            let downtimeToLog = 0;
+            let lastProdTimeToLog = 'N/A';
 
             // --- Initialization Logic (runs only if lastKnownTimestamps[table] is not set) ---
             if (!lastKnownTimestamps[table]) {
                 const initSql = `SELECT 
                                 timestamp 
-                                FROM ${dbConfig.database}.${table} ORDER BY 
-                                timestamp 
-                                DESC LIMIT 2`;
-                const [initRows] = await connection.execute(initSql);
-                if (initRows.length === 2) {
-                    const lastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
-                    const secondLastTs = moment.tz(initRows[1].timestamp, 'America/New_York').toDate();
-                    const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
+                                FROM ${dbConfig.database}.${table} 
+                                WHERE timestamp >= ? 
+                                ORDER BY timestamp DESC LIMIT 2`;
+                const [initRows] = await connection.execute(initSql, [todayShiftStart.format('YYYY-MM-DD HH:mm:ss')]);
 
-                    if (cycleTimeSeconds > 0) {
-                        // 5분 (300초) 이상이면 비정상으로 보고 NaN으로 처리
-                        if (cycleTimeSeconds > 300) {
-                            cycleTimeGauge.labels(table).set(NaN);
-                            console.log(`[${new Date().toISOString()}] Initial cycle time for ${table} is over 5 minutes (${cycleTimeSeconds}s). Setting to NaN.`);
-                        } else {
+                if (initRows.length > 0) {
+                    initRows.reverse(); 
+                    const lastTs = moment.tz(initRows[initRows.length - 1].timestamp, 'America/New_York').toDate();
+
+                    if (initRows.length === 2) {
+                        const secondLastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
+                        const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
+
+                        if (cycleTimeSeconds > 0) {
                             cycleTimeGauge.labels(table).set(cycleTimeSeconds);
-                            console.log(`[${new Date().toISOString()}] Initial cycle time for ${table} set to: ${cycleTimeSeconds}s`);
+                            lastKnownCycleTimes[table] = cycleTimeSeconds;
                         }
                     }
-                    lastKnownTimestamps[table] = lastTs; // Set the starting point
-                } else if (initRows.length === 1) {
-                    lastKnownTimestamps[table] = moment.tz(initRows[0].timestamp, 'America/New_York').toDate(); // Only one row exists, just set the starting point
+                    lastKnownTimestamps[table] = lastTs; 
+                } else {
+                    lastKnownTimestamps[table] = todayShiftStart.toDate();
                 }
-                console.log(`[${new Date().toISOString()}] Raw DB Initial timestamp for ${table}: ${initRows[0]?.timestamp}`);
-                console.log(`[${new Date().toISOString()}] Initial timestamp for ${table} loaded: ${lastKnownTimestamps[table]?.toISOString()}`);
             }
 
             // --- Main processing logic for new items (Cycle Time) ---
             const lastSeenTimestamp = lastKnownTimestamps[table];
             if (lastSeenTimestamp) {
-                console.log(`[${new Date().toISOString()}] Querying for new timestamps after: ${lastSeenTimestamp.toISOString()}`);
                 const sql = `SELECT 
                             timestamp 
                             FROM ${dbConfig.database}.${table} WHERE 
@@ -96,7 +97,6 @@ async function checkDowntime() {
                             timestamp 
                             ASC`;
                 const [newRows] = await connection.execute(sql, [moment.tz(lastSeenTimestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
-                console.log(`[${new Date().toISOString()}] Raw DB New Timestamps for ${table}: ${newRows.map(row => row.timestamp).join(', ')}`);
                 const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
 
                 if (newTimestamps.length > 0) {
@@ -104,24 +104,17 @@ async function checkDowntime() {
                     for (const currentTimestamp of newTimestamps) {
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
                         if (cycleTimeSeconds > 0) {
-                            // 5분 (300초) 이상이면 비정상으로 보고 NaN으로 처리
-                            if (cycleTimeSeconds > 300) {
-                                cycleTimeGauge.labels(table).set(NaN);
-                                console.log(`[${new Date().toISOString()}] New production cycle for ${table} is over 5 minutes (${cycleTimeSeconds}s). Setting to NaN. (Item: ${currentTimestamp.toISOString()})`);
-                            } else {
-                                cycleTimeGauge.labels(table).set(cycleTimeSeconds);
-                                console.log(`[${new Date().toISOString()}] New production cycle for ${table}: ${cycleTimeSeconds}s (Item: ${currentTimestamp.toISOString()})`);
-                            }
+                            cycleTimeGauge.labels(table).set(cycleTimeSeconds);
+                            lastKnownCycleTimes[table] = cycleTimeSeconds;
                         }
                         previousTimestampInBatch = currentTimestamp;
                     }
-                    // Update the global last known timestamp to the latest one from the batch
                     lastKnownTimestamps[table] = newTimestamps[newTimestamps.length - 1];
                 }
             }
 
             // --- Ongoing downtime calculation ---
-            const now = moment().tz('America/New_York'); // Use moment-timezone for consistency
+            const now = moment().tz('America/New_York');
             const currentHour = now.hours();
             const currentMinute = now.minutes();
 
@@ -129,25 +122,32 @@ async function checkDowntime() {
                 (currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
                 (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
 
-            console.log(`[${now.toISOString()}] Current Time: ${currentHour}:${currentMinute}, Is Working Hours: ${isWorkingHours}`);
-
             if (lastKnownTimestamps[table]) {
+                lastProdTimeToLog = moment.tz(lastKnownTimestamps[table], 'America/New_York').format('YYYY-MM-DD HH:mm:ss');
                 if (isWorkingHours) {
                     const lastProductionTime = moment.tz(lastKnownTimestamps[table], 'America/New_York');
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
-                    console.log(`Last Production Time for ${table} (America/New_York): ${lastProductionTime.format('YYYY-MM-DD HH:mm:ss')}`);
-                    ongoingDowntimeGauge.labels(table).set(downtimeSeconds > 0 ? downtimeSeconds : 0);
-                    console.log(`[${now.toISOString()}] Ongoing downtime for ${table}: ${downtimeSeconds}s`);
+                    downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
+                    ongoingDowntimeGauge.labels(table).set(downtimeToLog);
                 } else {
-                    ongoingDowntimeGauge.labels(table).set(0);
-                    console.log(`[${now.toISOString()}] Outside working hours, ongoing downtime for ${table} set to 0.`);
+                    downtimeToLog = 0;
+                    ongoingDowntimeGauge.labels(table).set(downtimeToLog);
                 }
             } else {
-                ongoingDowntimeGauge.labels(table).set(0); // No last production time, so no ongoing downtime
-                console.log(`[${now.toISOString()}] No last known timestamp for ${table}, ongoing downtime set to 0.`);
+                downtimeToLog = 0;
+                ongoingDowntimeGauge.labels(table).set(downtimeToLog);
             }
 
+            // --- Final Logging for this table ---
+            const currentTime = now.format('HH:mm');
+            console.log(
+                `[${new Date().toISOString()}] Current Time: ${currentTime}, Is Working Hours: ${isWorkingHours}, ` +
+                `Last Time ${table}: ${lastProdTimeToLog}, ` +
+                `downtime "${table}"} ${downtimeToLog}, ` +
+                `cycle_time "${table}"} ${lastKnownCycleTimes[table] || 'N/A'}`
+            );
         }
+
     } catch (error) {
         console.error('Database connection failed:', error.message);
     } finally {
