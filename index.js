@@ -38,7 +38,7 @@ promClient.collectDefaultMetrics({ register });
 const ongoingDowntimeGauge = new promClient.Gauge({
     name: 'production_ongoing_downtime_seconds',
     help: 'Ongoing downtime since the last production event for a specific line.',
-    labelNames: ['line'],
+    labelNames: ['line', 'model'],
     registers: [register]
 });
 
@@ -46,7 +46,7 @@ const ongoingDowntimeGauge = new promClient.Gauge({
 const cycleTimeGauge = new promClient.Gauge({
     name: 'production_cycle_time_seconds',
     help: 'The time elapsed between the last two production events for a specific line.',
-    labelNames: ['line'],
+    labelNames: ['line', 'model'],
     registers: [register]
 });
 
@@ -107,7 +107,7 @@ async function checkDowntime() {
             // --- Initialization Logic (runs only if lastKnownTimestamps[table] is not set) ---
             if (!lastKnownTimestamps[table]) {
                 const initSql = `SELECT 
-                                timestamp 
+                                timestamp, model 
                                 FROM ${dbConfig.database}.${table} 
                                 WHERE timestamp >= ? 
                                 ORDER BY timestamp DESC LIMIT 2`;
@@ -115,18 +115,21 @@ async function checkDowntime() {
 
                 if (initRows.length > 0) {
                     initRows.reverse(); 
-                    const lastTs = moment.tz(initRows[initRows.length - 1].timestamp, 'America/New_York').toDate();
+                    const lastProdEvent = initRows[initRows.length - 1];
+                    const lastTs = moment().tz(lastProdEvent.timestamp, 'America/New_York').toDate();
+                    const lastModel = lastProdEvent.model || 'unknown'; // Default to 'unknown' if model is null
 
                     if (initRows.length === 2) {
-                        const secondLastTs = moment.tz(initRows[0].timestamp, 'America/New_York').toDate();
+                        const secondLastProdEvent = initRows[0];
+                        const secondLastTs = moment().tz(secondLastProdEvent.timestamp, 'America/New_York').toDate();
                         const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
                         if (cycleTimeSeconds > 0) {
-                            cycleTimeGauge.labels(table).set(cycleTimeSeconds);
-                            lastKnownCycleTimes[table] = cycleTimeSeconds;
+                            cycleTimeGauge.labels(table, lastModel).set(cycleTimeSeconds);
+                            lastKnownCycleTimes[table] = { value: cycleTimeSeconds, model: lastModel };
                         }
                     }
-                    lastKnownTimestamps[table] = lastTs; 
+                    lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel }; 
                 } else {
                     // No production data found for today's shift yet.
                     // Downtime will be reported as 0 until the first event is detected.
@@ -135,29 +138,34 @@ async function checkDowntime() {
             }
 
             // --- Main processing logic for new items (Cycle Time) ---
-            const lastSeenTimestamp = lastKnownTimestamps[table];
-            if (lastSeenTimestamp) {
+            const lastKnownProdEvent = lastKnownTimestamps[table];
+            if (lastKnownProdEvent) {
                 const sql = `SELECT 
-                            timestamp 
+                            timestamp, model 
                             FROM ${dbConfig.database}.${table} WHERE 
                             timestamp 
                             > ? ORDER BY 
                             timestamp 
                             ASC`;
-                const [newRows] = await mysqlConnection.execute(sql, [moment.tz(lastSeenTimestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
-                const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
+                const [newRows] = await mysqlConnection.execute(sql, [moment().tz(lastKnownProdEvent.timestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
+                
+                if (newRows.length > 0) {
+                    let previousTimestampInBatch = lastKnownProdEvent.timestamp;
+                    let previousModelInBatch = lastKnownProdEvent.model;
 
-                if (newTimestamps.length > 0) {
-                    let previousTimestampInBatch = lastKnownTimestamps[table];
-                    for (const currentTimestamp of newTimestamps) {
+                    for (const currentProdEvent of newRows) {
+                        const currentTimestamp = moment().tz(currentProdEvent.timestamp, 'America/New_York').toDate();
+                        const currentModel = currentProdEvent.model || 'unknown';
+
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
                         if (cycleTimeSeconds > 0) {
-                            cycleTimeGauge.labels(table).set(cycleTimeSeconds);
-                            lastKnownCycleTimes[table] = cycleTimeSeconds;
+                            cycleTimeGauge.labels(table, currentModel).set(cycleTimeSeconds);
+                            lastKnownCycleTimes[table] = { value: cycleTimeSeconds, model: currentModel };
                         }
                         previousTimestampInBatch = currentTimestamp;
+                        previousModelInBatch = currentModel;
                     }
-                    lastKnownTimestamps[table] = newTimestamps[newTimestamps.length - 1];
+                    lastKnownTimestamps[table] = { timestamp: previousTimestampInBatch, model: previousModelInBatch };
                 }
             }
 
@@ -171,19 +179,23 @@ async function checkDowntime() {
                 (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
 
             if (lastKnownTimestamps[table]) {
-                lastProdTimeToLog = moment.tz(lastKnownTimestamps[table], 'America/New_York').format('YYYY-MM-DD HH:mm:ss');
+                const lastProdEvent = lastKnownTimestamps[table];
+                const lastProductionTime = moment().tz(lastProdEvent.timestamp, 'America/New_York');
+                const lastModel = lastProdEvent.model;
+
+                lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
                 if (isWorkingHours) {
-                    const lastProductionTime = moment.tz(lastKnownTimestamps[table], 'America/New_York');
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
                     downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
-                    ongoingDowntimeGauge.labels(table).set(downtimeToLog);
+                    ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 } else {
                     downtimeToLog = 0;
-                    ongoingDowntimeGauge.labels(table).set(downtimeToLog);
+                    ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 }
             } else {
+                // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
-                ongoingDowntimeGauge.labels(table).set(downtimeToLog);
+                ongoingDowntimeGauge.labels(table, 'no_production').set(downtimeToLog);
             }
 
             // --- Final Logging for this table ---
