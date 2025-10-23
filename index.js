@@ -177,7 +177,16 @@ async function checkDowntime() {
 
                 lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
                 if (isWorkingHours) {
-                    const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
+                    let effectiveLastProductionTime = lastProductionTime;
+                    const lunchBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(11).minute(30).second(0);
+
+                    // If last production was before or during lunch, and current time is after lunch,
+                    // start counting downtime from the end of lunch break.
+                    if (lastProductionTime.isBefore(lunchBreakEnd) && now.isAfter(lunchBreakEnd)) {
+                        effectiveLastProductionTime = lunchBreakEnd;
+                    }
+
+                    const downtimeSeconds = now.diff(effectiveLastProductionTime, 'seconds');
                     downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
                     ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 } else {
