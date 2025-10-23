@@ -116,12 +116,12 @@ async function checkDowntime() {
                 if (initRows.length > 0) {
                     initRows.reverse(); 
                     const lastProdEvent = initRows[initRows.length - 1];
-                    const lastTs = moment().tz(lastProdEvent.timestamp, 'America/New_York').toDate();
+                    const lastTs = moment.tz(lastProdEvent.timestamp, 'America/New_York').toDate();
                     const lastModel = lastProdEvent.model || 'unknown'; // Default to 'unknown' if model is null
 
                     if (initRows.length === 2) {
                         const secondLastProdEvent = initRows[0];
-                        const secondLastTs = moment().tz(secondLastProdEvent.timestamp, 'America/New_York').toDate();
+                        const secondLastTs = moment.tz(secondLastProdEvent.timestamp, 'America/New_York').toDate();
                         const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
                         if (cycleTimeSeconds > 0) {
@@ -154,7 +154,7 @@ async function checkDowntime() {
                     let previousModelInBatch = lastKnownProdEvent.model;
 
                     for (const currentProdEvent of newRows) {
-                        const currentTimestamp = moment().tz(currentProdEvent.timestamp, 'America/New_York').toDate();
+                        const currentTimestamp = moment.tz(currentProdEvent.timestamp, 'America/New_York').toDate();
                         const currentModel = currentProdEvent.model || 'unknown';
 
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
