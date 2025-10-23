@@ -144,6 +144,12 @@ async function checkDowntime() {
                         const currentTimestamp = moment.tz(currentProdEvent.timestamp, 'America/New_York').toDate();
                         const currentModel = currentProdEvent.model || 'unknown';
 
+                        // If the model has changed, set the gauge for the old model to 0
+                        if (currentModel !== previousModelInBatch) {
+                            console.log(`[INFO] Model changed for line ${table}: from ${previousModelInBatch} to ${currentModel}. Resetting old model's downtime to 0.`);
+                            ongoingDowntimeGauge.labels(table, previousModelInBatch).set(0);
+                        }
+
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
                         // Cycle time metric removed
                         previousTimestampInBatch = currentTimestamp;
