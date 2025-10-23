@@ -26,9 +26,9 @@ const mssqlConfig = { // MS SQL DB 설정
     }
 };
 
-
 const port = process.env.PORT || 8002;
 const tablesToMonitor = ['F01', 'R01'];
+
 
 // --- Prometheus Metrics ---
 const register = new promClient.Registry();
@@ -41,8 +41,6 @@ const ongoingDowntimeGauge = new promClient.Gauge({
     labelNames: ['line', 'model', 'status'],
     registers: [register]
 });
-
-
 
 
 // --- Application Logic ---
@@ -77,7 +75,21 @@ async function checkDowntime() {
             const { TotalPlan, TotalWorked } = result.recordset[0];
 
             // --- Conditional Downtime Calculation based on Production Plan ---
-            if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
+            if (TotalPlan === 0) {
+                // If there was a last known model, reset its working_hours downtime.
+                if (lastKnownTimestamps[table] && lastKnownTimestamps[table].model) {
+                    const lastModel = lastKnownTimestamps[table].model;
+                    ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(0);
+                    console.log(`[${new Date().toISOString()}] Line ${table}: Resetting downtime for model ${lastModel} because there is no production plan.`);
+                }
+
+                console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0. Setting downtime to 0.`);
+                ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
+                lastKnownTimestamps[table] = undefined; // Reset last known timestamp
+                continue; // Skip further downtime calculation for this table
+            }
+
+            if (TotalWorked >= TotalPlan) {
                 // If there was a last known model, reset its working_hours downtime.
                 if (lastKnownTimestamps[table] && lastKnownTimestamps[table].model) {
                     const lastModel = lastKnownTimestamps[table].model;
@@ -85,8 +97,8 @@ async function checkDowntime() {
                     console.log(`[${new Date().toISOString()}] Line ${table}: Resetting downtime for model ${lastModel} because production plan is met.`);
                 }
 
-                console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
-                ongoingDowntimeGauge.labels(table, '', 'no_production_or_plan_met').set(0);
+                console.log(`[${new Date().toISOString()}] Line ${table}: Actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
+                ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
             }
@@ -116,13 +128,6 @@ async function checkDowntime() {
                     const lastTs = moment.tz(lastProdEvent.timestamp, 'America/New_York').toDate();
                     const lastModel = lastProdEvent.model || 'unknown'; // Default to 'unknown' if model is null
 
-                    if (initRows.length === 2) {
-                        const secondLastProdEvent = initRows[0];
-                        const secondLastTs = moment.tz(secondLastProdEvent.timestamp, 'America/New_York').toDate();
-                        const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
-
-                        // Cycle time metric removed
-                    }
                     lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel }; 
                 } else {
                     // No production data found for today's shift yet.
@@ -157,8 +162,6 @@ async function checkDowntime() {
                             ongoingDowntimeGauge.labels(table, previousModelInBatch, 'working_hours').set(0);
                         }
 
-                        const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
-                        // Cycle time metric removed
                         previousTimestampInBatch = currentTimestamp;
                         previousModelInBatch = currentModel;
                     }
@@ -171,43 +174,43 @@ async function checkDowntime() {
             const currentHour = now.hours();
             const currentMinute = now.minutes();
 
-                        const isLunchBreak = currentHour === 11 && currentMinute <= 30; // 11:00 ~ 11:30 is lunch time.
-                        const isWorkingHours =
-                            ((currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
-                            (currentHour < 15 || (currentHour === 15 && currentMinute <= 30))) &&
-                            !isLunchBreak;
-            
-                        if (lastKnownTimestamps[table]) {
-                            const lastProdEvent = lastKnownTimestamps[table];
-                            const lastProductionTime = moment.tz(lastProdEvent.timestamp, 'America/New_York');
-                            const lastModel = lastProdEvent.model;
-            
-                            lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
-                            if (isWorkingHours) {
-                                let effectiveLastProductionTime = lastProductionTime;
-                                const lunchBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(11).minute(30).second(0);
-            
-                                // If last production was before or during lunch, and current time is after lunch,
-                                // start counting downtime from the end of lunch break.
-                                if (lastProductionTime.isBefore(lunchBreakEnd) && now.isAfter(lunchBreakEnd)) {
-                                    effectiveLastProductionTime = lunchBreakEnd;
-                                }
-            
-                                const downtimeSeconds = now.diff(effectiveLastProductionTime, 'seconds');
-                                downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
-                                ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(downtimeToLog);
-                            } else {
-                                                    let statusLabel = 'non_working_hours';
-                                                    if (isLunchBreak) {
-                                                        statusLabel = 'lunch_break';
-                                                    }
-                                                    downtimeToLog = 0;
-                                                    ongoingDowntimeGauge.labels(table, lastModel, statusLabel).set(downtimeToLog);                            }
-                        } else {
-                            // If no lastKnownTimestamps, set downtime to 0 with a default model label
-                            downtimeToLog = 0;
-                            ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(downtimeToLog);
-                        }
+            const isLunchBreak = currentHour === 11 && currentMinute <= 30; // 11:00 ~ 11:30 is lunch time.
+            const isWorkingHours =
+                ((currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
+                (currentHour < 15 || (currentHour === 15 && currentMinute <= 30))) &&
+                !isLunchBreak;
+
+            if (lastKnownTimestamps[table]) {
+                const lastProdEvent = lastKnownTimestamps[table];
+                const lastProductionTime = moment.tz(lastProdEvent.timestamp, 'America/New_York');
+                const lastModel = lastProdEvent.model;
+
+                lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
+                if (isWorkingHours) {
+                    let effectiveLastProductionTime = lastProductionTime;
+                    const lunchBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(11).minute(30).second(0);
+
+                    // If last production was before or during lunch, and current time is after lunch,
+                    // start counting downtime from the end of lunch break.
+                    if (lastProductionTime.isBefore(lunchBreakEnd) && now.isAfter(lunchBreakEnd)) {
+                        effectiveLastProductionTime = lunchBreakEnd;
+                    }
+
+                    const downtimeSeconds = now.diff(effectiveLastProductionTime, 'seconds');
+                    downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
+                    ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(downtimeToLog);
+                } else {
+                                        let statusLabel = 'non_working_hours';
+                                        if (isLunchBreak) {
+                                            statusLabel = 'lunch_break';
+                                        }
+                                        downtimeToLog = 0;
+                                        ongoingDowntimeGauge.labels(table, lastModel, statusLabel).set(downtimeToLog);                            }
+            } else {
+                // If no lastKnownTimestamps, set downtime to 0 with a default model label
+                downtimeToLog = 0;
+                ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(downtimeToLog);
+            }
             // --- Final Logging for this table ---
             const currentTime = now.format('HH:mm');
             console.log(
