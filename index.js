@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const mysql = require('mysql2/promise'); // MySQL 모듈 유지
 const sql = require('mssql'); // mssql 모듈 추가
