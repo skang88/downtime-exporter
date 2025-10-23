@@ -38,7 +38,7 @@ promClient.collectDefaultMetrics({ register });
 const ongoingDowntimeGauge = new promClient.Gauge({
     name: 'production_ongoing_downtime_seconds',
     help: 'Ongoing downtime since the last production event for a specific line.',
-    labelNames: ['line', 'model'],
+    labelNames: ['line', 'model', 'reason'],
     registers: [register]
 });
 
@@ -79,7 +79,7 @@ async function checkDowntime() {
             // --- Conditional Downtime Calculation based on Production Plan ---
             if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
-                ongoingDowntimeGauge.labels(table, 'no_production_or_plan_met').set(0);
+                ongoingDowntimeGauge.labels(table, '', 'no_production_or_plan_met').set(0);
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
             }
@@ -147,7 +147,7 @@ async function checkDowntime() {
                         // If the model has changed, set the gauge for the old model to 0
                         if (currentModel !== previousModelInBatch) {
                             console.log(`[INFO] Model changed for line ${table}: from ${previousModelInBatch} to ${currentModel}. Resetting old model's downtime to 0.`);
-                            ongoingDowntimeGauge.labels(table, previousModelInBatch).set(0);
+                            ongoingDowntimeGauge.labels(table, previousModelInBatch, 'model_changed').set(0);
                         }
 
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
@@ -187,16 +187,19 @@ async function checkDowntime() {
                     }
 
                     const downtimeSeconds = now.diff(effectiveLastProductionTime, 'seconds');
-                    downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
-                    ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
+                    ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(downtimeToLog);
                 } else {
+                    let reasonLabel = 'non_working_hours';
+                    if (isLunchBreak) {
+                        reasonLabel = 'lunch_break';
+                    }
                     downtimeToLog = 0;
-                    ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
+                    ongoingDowntimeGauge.labels(table, lastModel, reasonLabel).set(downtimeToLog);
                 }
             } else {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
-                ongoingDowntimeGauge.labels(table, 'no_production').set(downtimeToLog);
+                ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(downtimeToLog);
             }
 
             // --- Final Logging for this table ---
