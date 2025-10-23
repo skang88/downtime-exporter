@@ -168,21 +168,17 @@ async function checkDowntime() {
                 const lastModel = lastProdEvent.model;
 
                 lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
-                console.log(`[DEBUG] Line ${table}: isWorkingHours=${isWorkingHours}, lastProductionTime=${lastProductionTime.format()}, lastModel=${lastModel}`);
                 if (isWorkingHours) {
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
                     downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
-                    console.log(`[DEBUG] Line ${table}: downtimeSeconds=${downtimeSeconds}, downtimeToLog=${downtimeToLog}`);
                     ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 } else {
                     downtimeToLog = 0;
-                    console.log(`[DEBUG] Line ${table}: Not working hours, downtimeToLog=${downtimeToLog}`);
                     ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 }
             } else {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
-                console.log(`[DEBUG] Line ${table}: No lastKnownTimestamps, downtimeToLog=${downtimeToLog}`);
                 ongoingDowntimeGauge.labels(table, 'no_production').set(downtimeToLog);
             }
 
