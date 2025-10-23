@@ -78,6 +78,13 @@ async function checkDowntime() {
 
             // --- Conditional Downtime Calculation based on Production Plan ---
             if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
+                // If there was a last known model, reset its working_hours downtime.
+                if (lastKnownTimestamps[table] && lastKnownTimestamps[table].model) {
+                    const lastModel = lastKnownTimestamps[table].model;
+                    ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(0);
+                    console.log(`[${new Date().toISOString()}] Line ${table}: Resetting downtime for model ${lastModel} because production plan is met.`);
+                }
+
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
                 ongoingDowntimeGauge.labels(table, '', 'no_production_or_plan_met').set(0);
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
@@ -144,10 +151,10 @@ async function checkDowntime() {
                         const currentTimestamp = moment.tz(currentProdEvent.timestamp, 'America/New_York').toDate();
                         const currentModel = currentProdEvent.model || 'unknown';
 
-                        // If the model has changed, set the gauge for the old model to 0
+                        // If the model has changed, reset the working_hours gauge for the old model to 0
                         if (currentModel !== previousModelInBatch) {
-                            console.log(`[INFO] Model changed for line ${table}: from ${previousModelInBatch} to ${currentModel}. Resetting old model's downtime to 0.`);
-                            ongoingDowntimeGauge.labels(table, previousModelInBatch, 'model_changed').set(0);
+                            console.log(`[INFO] Model changed for line ${table}: from ${previousModelInBatch} to ${currentModel}. Resetting old model\'s working_hours downtime to 0.`);
+                            ongoingDowntimeGauge.labels(table, previousModelInBatch, 'working_hours').set(0);
                         }
 
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
