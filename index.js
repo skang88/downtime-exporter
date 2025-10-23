@@ -42,20 +42,13 @@ const ongoingDowntimeGauge = new promClient.Gauge({
     registers: [register]
 });
 
-// Metric 2: 과거 생산 사이클 시간 (직전 생산시간 ~ 마지막 생산시간)
-const cycleTimeGauge = new promClient.Gauge({
-    name: 'production_cycle_time_seconds',
-    help: 'The time elapsed between the last two production events for a specific line.',
-    labelNames: ['line', 'model'],
-    registers: [register]
-});
+
 
 
 // --- Application Logic ---
 const app = express();
 // 각 테이블의 마지막으로 확인된 타임스탬프와 사이클 타임을 저장합니다.
 let lastKnownTimestamps = {};
-let lastKnownCycleTimes = {};
 
 /**
  * 주기적으로 다운타임을 확인하고 메트릭을 업데이트합니다.
@@ -89,7 +82,6 @@ async function checkDowntime() {
                 ongoingDowntimeGauge.labels(table, 'no_production_or_plan_met').set(0);
                 cycleTimeGauge.labels(table, 'no_production_or_plan_met').set(0); // Also reset cycle time if no production/plan met
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
-                lastKnownCycleTimes[table] = undefined; // Reset last known cycle time
                 continue; // Skip further downtime calculation for this table
             }
 
@@ -98,7 +90,6 @@ async function checkDowntime() {
             if (lastKnownTimestamps[table] && moment(lastKnownTimestamps[table]).isBefore(todayShiftStart)) {
                 console.log(`[${new Date().toISOString()}] New shift detected for table ${table}. Resetting last known timestamp.`);
                 lastKnownTimestamps[table] = undefined;
-                lastKnownCycleTimes[table] = undefined;
             }
 
             let downtimeToLog = 0;
@@ -124,10 +115,7 @@ async function checkDowntime() {
                         const secondLastTs = moment.tz(secondLastProdEvent.timestamp, 'America/New_York').toDate();
                         const cycleTimeSeconds = (lastTs.getTime() - secondLastTs.getTime()) / 1000;
 
-                        if (cycleTimeSeconds > 0) {
-                            cycleTimeGauge.labels(table, lastModel).set(cycleTimeSeconds);
-                            lastKnownCycleTimes[table] = { value: cycleTimeSeconds, model: lastModel };
-                        }
+                        // Cycle time metric removed
                     }
                     lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel }; 
                 } else {
@@ -158,10 +146,7 @@ async function checkDowntime() {
                         const currentModel = currentProdEvent.model || 'unknown';
 
                         const cycleTimeSeconds = (currentTimestamp.getTime() - previousTimestampInBatch.getTime()) / 1000;
-                        if (cycleTimeSeconds > 0) {
-                            cycleTimeGauge.labels(table, currentModel).set(cycleTimeSeconds);
-                            lastKnownCycleTimes[table] = { value: cycleTimeSeconds, model: currentModel };
-                        }
+                        // Cycle time metric removed
                         previousTimestampInBatch = currentTimestamp;
                         previousModelInBatch = currentModel;
                     }
@@ -180,21 +165,25 @@ async function checkDowntime() {
 
             if (lastKnownTimestamps[table]) {
                 const lastProdEvent = lastKnownTimestamps[table];
-                const lastProductionTime = moment().tz(lastProdEvent.timestamp, 'America/New_York');
+                const lastProductionTime = moment.tz(lastProdEvent.timestamp, 'America/New_York');
                 const lastModel = lastProdEvent.model;
 
                 lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
+                console.log(`[DEBUG] Line ${table}: isWorkingHours=${isWorkingHours}, lastProductionTime=${lastProductionTime.format()}, lastModel=${lastModel}`);
                 if (isWorkingHours) {
                     const downtimeSeconds = now.diff(lastProductionTime, 'seconds');
                     downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
+                    console.log(`[DEBUG] Line ${table}: downtimeSeconds=${downtimeSeconds}, downtimeToLog=${downtimeToLog}`);
                     ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 } else {
                     downtimeToLog = 0;
+                    console.log(`[DEBUG] Line ${table}: Not working hours, downtimeToLog=${downtimeToLog}`);
                     ongoingDowntimeGauge.labels(table, lastModel).set(downtimeToLog);
                 }
             } else {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
+                console.log(`[DEBUG] Line ${table}: No lastKnownTimestamps, downtimeToLog=${downtimeToLog}`);
                 ongoingDowntimeGauge.labels(table, 'no_production').set(downtimeToLog);
             }
 
@@ -204,7 +193,6 @@ async function checkDowntime() {
                 `[${new Date().toISOString()}] Current Time: ${currentTime}, Is Working Hours: ${isWorkingHours}, ` +
                 `Last Time ${table}: ${lastProdTimeToLog}, ` +
                 `downtime "${table}"} ${downtimeToLog}, ` +
-                `cycle_time "${table}"} ${lastKnownCycleTimes[table] ? lastKnownCycleTimes[table].value : 'N/A'} (Model: ${lastKnownCycleTimes[table] ? lastKnownCycleTimes[table].model : 'N/A'}), ` +
                 `Plan: ${TotalPlan}, Worked: ${TotalWorked}`
             );
         }
