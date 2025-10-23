@@ -1,17 +1,29 @@
 const express = require('express');
-const mysql = require('mysql2/promise');
+const mysql = require('mysql2/promise'); // MySQL 모듈 유지
+const sql = require('mssql'); // mssql 모듈 추가
 const promClient = require('prom-client');
 const moment = require('moment-timezone');
 
 // --- Configuration ---
 // 환경 변수를 통해 데이터베이스 연결 정보를 설정하는 것이 좋습니다.
 
-const dbConfig = {
+const dbConfig = { // MySQL DB 설정
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
     database: process.env.DB_DATABASE, 
     dateStrings: true // DATETIME 값을 문자열로 가져오도록 설정
+};
+
+const mssqlConfig = { // MS SQL DB 설정
+    user: process.env.MSSQL_USER,
+    password: process.env.MSSQL_PASSWORD,
+    server: process.env.MSSQL_HOST, 
+    database: process.env.MSSQL_DATABASE,
+    options: {
+        encrypt: false, 
+        trustServerCertificate: true 
+    }
 };
 
 
@@ -49,12 +61,46 @@ let lastKnownCycleTimes = {};
  * 주기적으로 다운타임을 확인하고 메트릭을 업데이트합니다.
  */
 async function checkDowntime() {
-    let connection;
+    let mysqlConnection;
+    let mssqlConnection;
     try {
-        connection = await mysql.createConnection(dbConfig);
-        const todayShiftStart = moment().tz('America/New_York').startOf('day').add(7, 'hours');
+        mysqlConnection = await mysql.createConnection(dbConfig);
+        mssqlConnection = await sql.connect(mssqlConfig); // Establish MS SQL connection
+
+        const nowForShift = moment().tz('America/New_York');
+        const todayShiftStart = nowForShift.clone().startOf('day').add(7, 'hours');
 
         for (const table of tablesToMonitor) {
+            // --- Fetch Production Plan and Actual Production from MS SQL ---
+            const productionPlanQuery = `
+                SELECT ISNULL(SUM(PL_QTY), 0) AS TotalPlan, ISNULL(SUM(RH_QTY), 0) AS TotalWorked
+                FROM SAG.dbo.PRD_PRDPDPF
+                WHERE RDATE = CONVERT(CHAR(8), GETDATE(), 112)
+                  AND LTRIM(RTRIM(WRK_CD)) = @lineCode;
+            `;
+            const request = mssqlConnection.request();
+            request.input('lineCode', sql.NVarChar, table); // Parameterize lineCode
+            const result = await request.query(productionPlanQuery);
+            const { TotalPlan, TotalWorked } = result.recordset[0];
+
+            // --- Conditional Downtime Calculation based on Production Plan ---
+            if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
+                console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
+                ongoingDowntimeGauge.labels(table).set(0);
+                cycleTimeGauge.labels(table).set(0); // Also reset cycle time if no production/plan met
+                lastKnownTimestamps[table] = undefined; // Reset last known timestamp
+                lastKnownCycleTimes[table] = undefined; // Reset last known cycle time
+                continue; // Skip further downtime calculation for this table
+            }
+
+            // --- Daily Reset Logic ---
+            // If the last known timestamp is from before the start of today's shift, reset it.
+            if (lastKnownTimestamps[table] && moment(lastKnownTimestamps[table]).isBefore(todayShiftStart)) {
+                console.log(`[${new Date().toISOString()}] New shift detected for table ${table}. Resetting last known timestamp.`);
+                lastKnownTimestamps[table] = undefined;
+                lastKnownCycleTimes[table] = undefined;
+            }
+
             let downtimeToLog = 0;
             let lastProdTimeToLog = 'N/A';
 
@@ -65,7 +111,7 @@ async function checkDowntime() {
                                 FROM ${dbConfig.database}.${table} 
                                 WHERE timestamp >= ? 
                                 ORDER BY timestamp DESC LIMIT 2`;
-                const [initRows] = await connection.execute(initSql, [todayShiftStart.format('YYYY-MM-DD HH:mm:ss')]);
+                const [initRows] = await mysqlConnection.execute(initSql, [todayShiftStart.format('YYYY-MM-DD HH:mm:ss')]);
 
                 if (initRows.length > 0) {
                     initRows.reverse(); 
@@ -82,7 +128,9 @@ async function checkDowntime() {
                     }
                     lastKnownTimestamps[table] = lastTs; 
                 } else {
-                    lastKnownTimestamps[table] = todayShiftStart.toDate();
+                    // No production data found for today's shift yet.
+                    // Downtime will be reported as 0 until the first event is detected.
+                    lastKnownTimestamps[table] = undefined;
                 }
             }
 
@@ -96,7 +144,7 @@ async function checkDowntime() {
                             > ? ORDER BY 
                             timestamp 
                             ASC`;
-                const [newRows] = await connection.execute(sql, [moment.tz(lastSeenTimestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
+                const [newRows] = await mysqlConnection.execute(sql, [moment.tz(lastSeenTimestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
                 const newTimestamps = newRows.map(row => moment.tz(row.timestamp, 'America/New_York').toDate());
 
                 if (newTimestamps.length > 0) {
@@ -144,15 +192,19 @@ async function checkDowntime() {
                 `[${new Date().toISOString()}] Current Time: ${currentTime}, Is Working Hours: ${isWorkingHours}, ` +
                 `Last Time ${table}: ${lastProdTimeToLog}, ` +
                 `downtime "${table}"} ${downtimeToLog}, ` +
-                `cycle_time "${table}"} ${lastKnownCycleTimes[table] || 'N/A'}`
+                `cycle_time "${table}"} ${lastKnownCycleTimes[table] || 'N/A'}, ` +
+                `Plan: ${TotalPlan}, Worked: ${TotalWorked}`
             );
         }
 
     } catch (error) {
         console.error('Database connection failed:', error.message);
     } finally {
-        if (connection) {
-            await connection.end();
+        if (mysqlConnection) {
+            await mysqlConnection.end();
+        }
+        if (mssqlConnection) {
+            await mssqlConnection.close();
         }
     }
 }

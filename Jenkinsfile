@@ -27,7 +27,11 @@ pipeline {
                         string(credentialsId: 'db-host', variable: 'DB_HOST_SECRET'),
                         string(credentialsId: 'db-user', variable: 'DB_USER_SECRET'),
                         string(credentialsId: 'db-password', variable: 'DB_PASSWORD_SECRET'),
-                        string(credentialsId: 'db-database', variable: 'DB_DATABASE_SECRET')
+                        string(credentialsId: 'db-database', variable: 'DB_DATABASE_SECRET'),
+                        string(credentialsId: 'mssql-host', variable: 'MSSQL_HOST_SECRET'),
+                        string(credentialsId: 'mssql-user', variable: 'MSSQL_USER_SECRET'),
+                        string(credentialsId: 'mssql-password', variable: 'MSSQL_PASSWORD_SECRET'),
+                        string(credentialsId: 'mssql-database', variable: 'MSSQL_DATABASE_SECRET')
                     ]) {
                         sh '''
                             docker stop ${IMAGE_NAME} || true
@@ -38,6 +42,10 @@ pipeline {
                                 -e DB_USER=${DB_USER_SECRET} \
                                 -e DB_PASSWORD=${DB_PASSWORD_SECRET} \
                                 -e DB_DATABASE=${DB_DATABASE_SECRET} \
+                                -e MSSQL_HOST=${MSSQL_HOST_SECRET} \
+                                -e MSSQL_USER=${MSSQL_USER_SECRET} \
+                                -e MSSQL_PASSWORD=${MSSQL_PASSWORD_SECRET} \
+                                -e MSSQL_DATABASE=${MSSQL_DATABASE_SECRET} \
                                 ${IMAGE_NAME}:${IMAGE_TAG}
                         '''
                     }
