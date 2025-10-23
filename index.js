@@ -80,7 +80,6 @@ async function checkDowntime() {
             if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
                 ongoingDowntimeGauge.labels(table, 'no_production_or_plan_met').set(0);
-                cycleTimeGauge.labels(table, 'no_production_or_plan_met').set(0); // Also reset cycle time if no production/plan met
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
             }
