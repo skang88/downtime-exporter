@@ -86,8 +86,8 @@ async function checkDowntime() {
             // --- Conditional Downtime Calculation based on Production Plan ---
             if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
-                ongoingDowntimeGauge.labels(table).set(0);
-                cycleTimeGauge.labels(table).set(0); // Also reset cycle time if no production/plan met
+                ongoingDowntimeGauge.labels(table, 'no_production_or_plan_met').set(0);
+                cycleTimeGauge.labels(table, 'no_production_or_plan_met').set(0); // Also reset cycle time if no production/plan met
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 lastKnownCycleTimes[table] = undefined; // Reset last known cycle time
                 continue; // Skip further downtime calculation for this table
@@ -108,7 +108,7 @@ async function checkDowntime() {
             if (!lastKnownTimestamps[table]) {
                 const initSql = `SELECT 
                                 timestamp, model 
-                                FROM ${dbConfig.database}.${table} 
+                                FROM SPC.${table} 
                                 WHERE timestamp >= ? 
                                 ORDER BY timestamp DESC LIMIT 2`;
                 const [initRows] = await mysqlConnection.execute(initSql, [todayShiftStart.format('YYYY-MM-DD HH:mm:ss')]);
@@ -142,7 +142,7 @@ async function checkDowntime() {
             if (lastKnownProdEvent) {
                 const sql = `SELECT 
                             timestamp, model 
-                            FROM ${dbConfig.database}.${table} WHERE 
+                            FROM SPC.${table} WHERE 
                             timestamp 
                             > ? ORDER BY 
                             timestamp 
@@ -204,7 +204,7 @@ async function checkDowntime() {
                 `[${new Date().toISOString()}] Current Time: ${currentTime}, Is Working Hours: ${isWorkingHours}, ` +
                 `Last Time ${table}: ${lastProdTimeToLog}, ` +
                 `downtime "${table}"} ${downtimeToLog}, ` +
-                `cycle_time "${table}"} ${lastKnownCycleTimes[table] || 'N/A'}, ` +
+                `cycle_time "${table}"} ${lastKnownCycleTimes[table] ? lastKnownCycleTimes[table].value : 'N/A'} (Model: ${lastKnownCycleTimes[table] ? lastKnownCycleTimes[table].model : 'N/A'}), ` +
                 `Plan: ${TotalPlan}, Worked: ${TotalWorked}`
             );
         }
