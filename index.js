@@ -134,7 +134,7 @@ async function checkDowntime() {
                             > ? ORDER BY 
                             timestamp 
                             ASC`;
-                const [newRows] = await mysqlConnection.execute(sql, [moment().tz(lastKnownProdEvent.timestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
+                const [newRows] = await mysqlConnection.execute(sql, [moment.tz(lastKnownProdEvent.timestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
                 
                 if (newRows.length > 0) {
                     let previousTimestampInBatch = lastKnownProdEvent.timestamp;
