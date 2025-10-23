@@ -75,10 +75,11 @@ async function checkDowntime() {
             request.input('lineCode', sql.NVarChar, table); // Parameterize lineCode
             const result = await request.query(productionPlanQuery);
             const { TotalPlan, TotalWorked } = result.recordset[0];
+            console.log(`[${new Date().toISOString()}] Line ${table}: TotalPlan=${TotalPlan}, TotalWorked=${TotalWorked}`);
 
             // --- Conditional Downtime Calculation based on Production Plan ---
             if (TotalPlan === 0 || TotalWorked >= TotalPlan) {
-                console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
+                console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0 or actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0. (Condition met)`);
                 ongoingDowntimeGauge.labels(table, '', 'no_production_or_plan_met').set(0);
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
@@ -117,12 +118,15 @@ async function checkDowntime() {
                         // Cycle time metric removed
                     }
                     lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel }; 
+                    console.log(`[${new Date().toISOString()}] Line ${table}: Initial lastKnownTimestamps set to ${JSON.stringify(lastKnownTimestamps[table])}`); 
                 } else {
                     // No production data found for today's shift yet.
                     // Downtime will be reported as 0 until the first event is detected.
                     lastKnownTimestamps[table] = undefined;
+                    console.log(`[${new Date().toISOString()}] Line ${table}: No initial production data found. lastKnownTimestamps is undefined.`); 
                 }
             }
+            console.log(`[${new Date().toISOString()}] Line ${table}: Before main downtime calculation, lastKnownTimestamps is ${JSON.stringify(lastKnownTimestamps[table])}`);
 
             // --- Main processing logic for new items (Cycle Time) ---
             const lastKnownProdEvent = lastKnownTimestamps[table];
@@ -169,6 +173,7 @@ async function checkDowntime() {
                 ((currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
                 (currentHour < 15 || (currentHour === 15 && currentMinute <= 30))) &&
                 !isLunchBreak;
+            console.log(`[${new Date().toISOString()}] Line ${table}: isLunchBreak=${isLunchBreak}, isWorkingHours=${isWorkingHours}`);
 
             if (lastKnownTimestamps[table]) {
                 const lastProdEvent = lastKnownTimestamps[table];
@@ -187,6 +192,9 @@ async function checkDowntime() {
                     }
 
                     const downtimeSeconds = now.diff(effectiveLastProductionTime, 'seconds');
+                    console.log(`[${new Date().toISOString()}] Line ${table}: Debugging downtime - now=${now.format('YYYY-MM-DD HH:mm:ss.SSS')}, effectiveLastProductionTime=${effectiveLastProductionTime.format('YYYY-MM-DD HH:mm:ss.SSS')}, raw_downtimeSeconds=${now.diff(effectiveLastProductionTime, 'seconds')}`);
+                    downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
+                    console.log(`[${new Date().toISOString()}] Line ${table}: Calculated downtimeToLog=${downtimeToLog} (working hours)`);
                     ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(downtimeToLog);
                 } else {
                     let reasonLabel = 'non_working_hours';
@@ -194,11 +202,13 @@ async function checkDowntime() {
                         reasonLabel = 'lunch_break';
                     }
                     downtimeToLog = 0;
+                    console.log(`[${new Date().toISOString()}] Line ${table}: downtimeToLog=${downtimeToLog} (non-working hours/lunch)`);
                     ongoingDowntimeGauge.labels(table, lastModel, reasonLabel).set(downtimeToLog);
                 }
             } else {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
+                    console.log(`[${new Date().toISOString()}] Line ${table}: downtimeToLog=${downtimeToLog} (no production data)`);
                 ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(downtimeToLog);
             }
 
