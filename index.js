@@ -86,7 +86,7 @@ async function checkDowntime() {
 
             // --- Daily Reset Logic ---
             // If the last known timestamp is from before the start of today's shift, reset it.
-            if (lastKnownTimestamps[table] && moment(lastKnownTimestamps[table]).isBefore(todayShiftStart)) {
+            if (lastKnownTimestamps[table] && moment.tz(lastKnownTimestamps[table].timestamp, 'America/New_York').isBefore(todayShiftStart)) {
                 console.log(`[${new Date().toISOString()}] New shift detected for table ${table}. Resetting last known timestamp.`);
                 lastKnownTimestamps[table] = undefined;
             }
