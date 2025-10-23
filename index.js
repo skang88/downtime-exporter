@@ -164,9 +164,11 @@ async function checkDowntime() {
             const currentHour = now.hours();
             const currentMinute = now.minutes();
 
+            const isLunchBreak = currentHour === 11 && currentMinute <= 30; // 11:00 ~ 11:30 is lunch time.
             const isWorkingHours =
-                (currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
-                (currentHour < 15 || (currentHour === 15 && currentMinute <= 30));
+                ((currentHour > 7 || (currentHour === 7 && currentMinute >= 0)) &&
+                (currentHour < 15 || (currentHour === 15 && currentMinute <= 30))) &&
+                !isLunchBreak;
 
             if (lastKnownTimestamps[table]) {
                 const lastProdEvent = lastKnownTimestamps[table];
