@@ -86,8 +86,8 @@ async function checkDowntime() {
 
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0. Setting downtime to 0.`);
                 ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
-                ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
-                ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(0);
+                ongoingDowntimeGauge.remove(table, '', 'production_complete');
+                ongoingDowntimeGauge.remove(table, '', 'no_production_data');
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
             }
@@ -102,8 +102,8 @@ async function checkDowntime() {
 
                 console.log(`[${new Date().toISOString()}] Line ${table}: Actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
                 ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
-                ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
-                ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(0);
+                ongoingDowntimeGauge.remove(table, '', 'no_production');
+                ongoingDowntimeGauge.remove(table, '', 'no_production_data');
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
                 continue; // Skip further downtime calculation for this table
             }
@@ -192,9 +192,9 @@ async function checkDowntime() {
 
                 lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
                 if (isWorkingHours) {
-                    ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
-                    ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
-                    ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(0);
+                    ongoingDowntimeGauge.remove(table, '', 'no_production');
+                    ongoingDowntimeGauge.remove(table, '', 'production_complete');
+                    ongoingDowntimeGauge.remove(table, '', 'no_production_data');
 
                     let effectiveLastProductionTime = lastProductionTime;
                     const lunchBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(11).minute(30).second(0);
@@ -219,8 +219,8 @@ async function checkDowntime() {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
                 ongoingDowntimeGauge.labels(table, '', 'no_production_data').set(downtimeToLog);
-                ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
-                ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
+                ongoingDowntimeGauge.remove(table, '', 'no_production');
+                ongoingDowntimeGauge.remove(table, '', 'production_complete');
             }
             // --- Final Logging for this table ---
             const currentTime = now.format('HH:mm');
