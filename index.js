@@ -85,7 +85,6 @@ async function checkDowntime() {
                 }
 
                 console.log(`[${new Date().toISOString()}] Line ${table}: Production plan is 0. Setting downtime to 0.`);
-                ongoingDowntimeGauge.labels(table, '', 'no_production').set(0);
                 ongoingDowntimeGauge.remove(table, '', 'production_complete');
                 ongoingDowntimeGauge.remove(table, '', 'no_production_data');
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
@@ -101,7 +100,6 @@ async function checkDowntime() {
                 }
 
                 console.log(`[${new Date().toISOString()}] Line ${table}: Actual production (${TotalWorked}) meets/exceeds plan (${TotalPlan}). Setting downtime to 0.`);
-                ongoingDowntimeGauge.labels(table, '', 'production_complete').set(0);
                 ongoingDowntimeGauge.remove(table, '', 'no_production');
                 ongoingDowntimeGauge.remove(table, '', 'no_production_data');
                 lastKnownTimestamps[table] = undefined; // Reset last known timestamp
@@ -164,7 +162,7 @@ async function checkDowntime() {
                         // If the model has changed, reset the working_hours gauge for the old model to 0
                         if (currentModel !== previousModelInBatch) {
                             console.log(`[INFO] Model changed for line ${table}: from ${previousModelInBatch} to ${currentModel}. Resetting old model\'s working_hours downtime to 0.`);
-                            ongoingDowntimeGauge.labels(table, previousModelInBatch, 'working_hours').set(0);
+                            ongoingDowntimeGauge.remove(table, previousModelInBatch, 'working_hours');
                         }
 
                         previousTimestampInBatch = currentTimestamp;
