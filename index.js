@@ -183,6 +183,11 @@ async function checkDowntime() {
                 (currentHour < 15 || (currentHour === 15 && currentMinute <= 30))) &&
                 !isLunchBreak;
 
+            // If it's not lunch break, ensure the lunch_break metric is removed.
+            if (!isLunchBreak) {
+                ongoingDowntimeGauge.remove(table, lastKnownTimestamps[table]?.model || '', 'lunch_break');
+            }
+
             if (lastKnownTimestamps[table]) {
                 const lastProdEvent = lastKnownTimestamps[table];
                 const lastProductionTime = moment.tz(lastProdEvent.timestamp, 'America/New_York');
