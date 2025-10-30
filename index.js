@@ -212,12 +212,16 @@ async function checkDowntime() {
                     downtimeToLog = downtimeSeconds > 0 ? downtimeSeconds : 0;
                     ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(downtimeToLog);
                 } else {
-                                        let statusLabel = 'non_working_hours';
-                                        if (isLunchBreak) {
-                                            statusLabel = 'lunch_break';
-                                        }
-                                        downtimeToLog = 0;
-                                        ongoingDowntimeGauge.labels(table, lastModel, statusLabel).set(downtimeToLog);                            }
+                    // Not working hours, so reset working_hours downtime to 0.
+                    ongoingDowntimeGauge.labels(table, lastModel, 'working_hours').set(0);
+
+                    let statusLabel = 'non_working_hours';
+                    if (isLunchBreak) {
+                        statusLabel = 'lunch_break';
+                    }
+                    downtimeToLog = 0;
+                    ongoingDowntimeGauge.labels(table, lastModel, statusLabel).set(downtimeToLog);
+                }
             } else {
                 // If no lastKnownTimestamps, set downtime to 0 with a default model label
                 downtimeToLog = 0;
