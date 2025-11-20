@@ -28,7 +28,7 @@ const mssqlConfig = { // MS SQL DB 설정
 };
 
 const port = process.env.PORT || 8002;
-const tablesToMonitor = ['F01', 'R01'];
+const tablesToMonitor = ['F01', 'R01', 'C01'];
 
 
 // --- Prometheus Metrics ---
