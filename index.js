@@ -1,28 +1,28 @@
 require('dotenv').config();
 const express = require('express');
-const mysql = require('mysql2/promise'); 
-const sql = require('mssql'); 
+const mysql = require('mysql2/promise');
+const sql = require('mssql');
 const promClient = require('prom-client');
 const moment = require('moment-timezone');
 
 // --- Configuration ---
-const dbConfig = { 
+const dbConfig = {
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE, 
-    dateStrings: true 
+    database: process.env.DB_DATABASE,
+    dateStrings: true
 };
 
-const mssqlConfig = { 
+const mssqlConfig = {
     user: process.env.MSSQL_USER,
     password: process.env.MSSQL_PASSWORD,
-    server: process.env.MSSQL_HOST, 
+    server: process.env.MSSQL_HOST,
     database: process.env.MSSQL_DATABASE,
     port: Number(process.env.MSSQL_PORT) || 1433,
     options: {
-        encrypt: false, 
-        trustServerCertificate: true 
+        encrypt: false,
+        trustServerCertificate: true
     }
 };
 
@@ -56,12 +56,31 @@ async function checkDowntime() {
         const currentMinute = now.minutes();
         const currentTotalMinutes = currentHour * 60 + currentMinute;
 
-        // [핵심 1] 새벽 0시 ~ 7시 사이라면, 현재 시프트는 '전날 저녁에 시작된 야간조'입니다.
-        // 따라서 MS SQL 생산 계획(RDATE)도 전날 날짜로 조회해야 새벽에 0으로 떨어지지 않습니다.
+        // [핵심 1] PRD_PRDPDPF는 WRKJO 컬럼으로 교대조를 구분합니다.
+        //   WRKJO = 'P' : 주간조, WRKJO = 'Y' : 야간조 (같은 RDATE에 별도 행으로 입력)
+        // 야간조는 자정을 넘어 다음날 새벽 2시까지 운영되므로,
+        // 자정 이후에는 교대 시작일(전날)의 야간 계획 행을 조회해야 합니다.
         const isPastMidnight = currentHour < 7;
-        const targetRDate = isPastMidnight 
-            ? now.clone().subtract(1, 'days').format('YYYYMMDD') 
-            : now.format('YYYYMMDD');
+
+        const todayStr = now.format('YYYYMMDD');
+        const yesterdayStr = now.clone().subtract(1, 'days').format('YYYYMMDD');
+
+        // 현재 교대조와 해당 교대 계획의 RDATE 결정
+        let shiftCode;   // 'P' = 주간조, 'Y' = 야간조
+        let planRDate;
+        if (isPastMidnight) {
+            // 00:00 ~ 07:00 : 전날 저녁에 시작한 야간조
+            shiftCode = 'Y';
+            planRDate = yesterdayStr;
+        } else if (currentTotalMinutes >= 1050) {
+            // 17:30 ~ 24:00 : 오늘 시작한 야간조
+            shiftCode = 'Y';
+            planRDate = todayStr;
+        } else {
+            // 07:00 ~ 17:30 : 주간조
+            shiftCode = 'P';
+            planRDate = todayStr;
+        }
 
         let todayShiftStart = now.clone().startOf('day').add(7, 'hours');
         if (isPastMidnight) {
@@ -70,17 +89,37 @@ async function checkDowntime() {
 
         for (const table of tablesToMonitor) {
             // --- Fetch Production Plan and Actual Production from MS SQL ---
+            // 현재 교대조(WRKJO)에 해당하는 계획/실적만 조회.
+            // 야간 계획이 아직 미확정으로 입력 전일 경우(WRKJO='Y' 행이 없으면) 대비해
+            // 교대조 필터 없이 재조회하는 fallback을 둡니다.
             const productionPlanQuery = `
+                SELECT ISNULL(SUM(PL_QTY), 0) AS TotalPlan, ISNULL(SUM(RH_QTY), 0) AS TotalWorked
+                FROM SAG.dbo.PRD_PRDPDPF
+                WHERE RDATE = @rdate
+                  AND LTRIM(RTRIM(WRK_CD)) = @lineCode
+                  AND LTRIM(RTRIM(WRKJO)) = @shiftCode;
+            `;
+            const productionPlanQueryFallback = `
                 SELECT ISNULL(SUM(PL_QTY), 0) AS TotalPlan, ISNULL(SUM(RH_QTY), 0) AS TotalWorked
                 FROM SAG.dbo.PRD_PRDPDPF
                 WHERE RDATE = @rdate
                   AND LTRIM(RTRIM(WRK_CD)) = @lineCode;
             `;
             const request = mssqlConnection.request();
-            request.input('rdate', sql.VarChar, targetRDate); // 자정 보정된 날짜 적용
-            request.input('lineCode', sql.NVarChar, table); 
-            const result = await request.query(productionPlanQuery);
-            const { TotalPlan, TotalWorked } = result.recordset[0];
+            request.input('rdate', sql.VarChar, planRDate);
+            request.input('lineCode', sql.NVarChar, table);
+            request.input('shiftCode', sql.NVarChar, shiftCode);
+            let result = await request.query(productionPlanQuery);
+            let { TotalPlan, TotalWorked } = result.recordset[0];
+
+            // 야간 계획 행(WRKJO='Y')이 아직 없으면 교대조 구분 없이 재조회
+            if (TotalPlan === 0 && shiftCode === 'Y') {
+                const fallbackRequest = mssqlConnection.request();
+                fallbackRequest.input('rdate', sql.VarChar, planRDate);
+                fallbackRequest.input('lineCode', sql.NVarChar, table);
+                result = await fallbackRequest.query(productionPlanQueryFallback);
+                ({ TotalPlan, TotalWorked } = result.recordset[0]);
+            }
 
             if (TotalPlan === 0) {
                 if (lastKnownTimestamps[table] && lastKnownTimestamps[table].model) {
@@ -89,8 +128,8 @@ async function checkDowntime() {
                 }
                 ongoingDowntimeGauge.remove(table, '', 'production_complete');
                 ongoingDowntimeGauge.remove(table, '', 'no_production_data');
-                lastKnownTimestamps[table] = undefined; 
-                continue; 
+                lastKnownTimestamps[table] = undefined;
+                continue;
             }
 
             if (TotalWorked >= TotalPlan) {
@@ -100,8 +139,8 @@ async function checkDowntime() {
                 }
                 ongoingDowntimeGauge.remove(table, '', 'no_production');
                 ongoingDowntimeGauge.remove(table, '', 'no_production_data');
-                lastKnownTimestamps[table] = undefined; 
-                continue; 
+                lastKnownTimestamps[table] = undefined;
+                continue;
             }
 
             if (lastKnownTimestamps[table] && moment.tz(lastKnownTimestamps[table].timestamp, 'America/New_York').isBefore(todayShiftStart)) {
@@ -116,11 +155,11 @@ async function checkDowntime() {
                 const [initRows] = await mysqlConnection.execute(initSql, [todayShiftStart.format('YYYY-MM-DD HH:mm:ss')]);
 
                 if (initRows.length > 0) {
-                    initRows.reverse(); 
+                    initRows.reverse();
                     const lastProdEvent = initRows[initRows.length - 1];
                     const lastTs = moment.tz(lastProdEvent.timestamp, 'America/New_York').toDate();
-                    const lastModel = lastProdEvent.model || 'unknown'; 
-                    lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel }; 
+                    const lastModel = lastProdEvent.model || 'unknown';
+                    lastKnownTimestamps[table] = { timestamp: lastTs, model: lastModel };
                 } else {
                     lastKnownTimestamps[table] = undefined;
                 }
@@ -130,7 +169,7 @@ async function checkDowntime() {
             if (lastKnownProdEvent) {
                 const sqlQuery = `SELECT timestamp, model FROM SPC.${table} WHERE timestamp > ? ORDER BY timestamp ASC`;
                 const [newRows] = await mysqlConnection.execute(sqlQuery, [moment.tz(lastKnownProdEvent.timestamp, 'America/New_York').format('YYYY-MM-DD HH:mm:ss')]);
-                
+
                 if (newRows.length > 0) {
                     let previousTimestampInBatch = lastKnownProdEvent.timestamp;
                     let previousModelInBatch = lastKnownProdEvent.model;
@@ -155,7 +194,7 @@ async function checkDowntime() {
             const isDayShift = currentTotalMinutes >= 420 && currentTotalMinutes <= 1050;
 
             // 야간조: 17:30 (1050분) ~ 자정(1440분) 및 자정 ~ 새벽 2시(120분)
-            const isNightShift = (currentTotalMinutes >= 1050 && currentTotalMinutes <= 1439) || 
+            const isNightShift = (currentTotalMinutes >= 1050 && currentTotalMinutes <= 1439) ||
                                    (currentTotalMinutes >= 0 && currentTotalMinutes < 120);
 
             const isWorkingHours = isDayShift || isNightShift;
@@ -176,14 +215,14 @@ async function checkDowntime() {
                 const lastModel = lastProdEvent.model;
 
                 lastProdTimeToLog = lastProductionTime.format('YYYY-MM-DD HH:mm:ss');
-                
+
                 if (isWorkingHours && !isLunchBreak) {
                     ongoingDowntimeGauge.remove(table, '', 'no_production');
                     ongoingDowntimeGauge.remove(table, '', 'production_complete');
                     ongoingDowntimeGauge.remove(table, '', 'no_production_data');
 
                     let effectiveLastProductionTime = lastProductionTime;
-                    
+
                     // 점심 휴게 종료(11:30) 및 저녁 휴게 종료(22:00) 시간 보정
                     const lunchBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(11).minute(30).second(0);
                     const dinnerBreakEnd = moment(lastProductionTime).tz('America/New_York').hour(22).minute(0).second(0);
